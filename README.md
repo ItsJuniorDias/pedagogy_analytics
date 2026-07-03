@@ -12,6 +12,8 @@ Sem SDK de terceiro, sem IDFA — compatível com a categoria Kids.
 
 ## Rodar local em 30 segundos
 
+> Requer **Node ≥ 22.5** (usa o módulo embutido `node:sqlite` — nada pra compilar).
+
 ```bash
 npm install
 npm run seed     # popula ~14 dias de eventos de exemplo (opcional)
@@ -83,17 +85,33 @@ No Render: *New + → Blueprint →* aponte pro repositório. Ele cria o web ser
 + um Postgres grátis, liga o `DATABASE_URL` sozinho e gera o `ADMIN_TOKEN`
 (veja em *Environment*).
 
-**Opção B — Web Service manual:**
-- Build: `npm install && npm run build`
-- Start: `npm start`
-- Health check path: `/health`
-- Env: `NODE_ENV=production`, `ADMIN_TOKEN=<forte>`, e o `DATABASE_URL` do seu
-  Postgres do Render.
+**Opção B — Web Service manual (corrigir um serviço existente):**
+- **Language/Runtime:** Node
+- **Build Command:** `npm install && npm run build`
+- **Start Command:** `npm start`
+- **Health check path:** `/health`
+- **Environment:** `NODE_ENV=production`, `ADMIN_TOKEN=<forte>`, e o `DATABASE_URL`
+  de um Postgres do Render (Internal Connection String).
 
-> ⚠️ **Persistência no Render:** o filesystem é efêmero. Se usar **SQLite** sem
-> um disco montado, os eventos somem a cada deploy. Em produção use **Postgres**
-> (basta setar `DATABASE_URL` — o app troca de driver sozinho) ou monte um disco
-> e aponte `DB_PATH` pra ele.
+O arquivo `.node-version` (22.11.0) fixa o Node numa LTS — sem isso o Render pega
+a última (ex.: Node 26), que quebra libs.
+
+> ⚠️ **Persistência no Render:** o filesystem é efêmero. Em produção use
+> **Postgres** (basta setar `DATABASE_URL` — o app troca de driver sozinho); com
+> SQLite sem disco montado, os eventos somem a cada deploy.
+
+### Troubleshooting: `Build failed · exited with status 127`
+
+Sintoma nos logs: `No prebuilt binaries found` + `node-gyp: command not found`
++ `install script from "better-sqlite3" exited with 127`.
+
+Causa: uma dependência nativa tentando compilar num Node muito novo, sem
+`node-gyp` no ambiente. **Este projeto não usa mais dependência nativa** (o
+driver SQLite é o `node:sqlite` embutido), então:
+1. Confirme que o **Build Command** está `npm install && npm run build`
+   (não `bun install` puro — o Bun não roda o `tsc` e não traz `node-gyp`).
+2. Garanta que o `.node-version` está no repo (fixa Node 22).
+3. Em produção, defina `DATABASE_URL` (Postgres) — o SQLite nem é carregado lá.
 
 ---
 
@@ -138,7 +156,7 @@ src/
   db/
     index.ts         # escolhe o driver (Postgres se DATABASE_URL, senão SQLite)
     types.ts         # contrato Store + tipos
-    sqlite.ts        # driver SQLite (better-sqlite3, opcional/lazy)
+    sqlite.ts        # driver SQLite (node:sqlite embutido, sem dep nativa)
     postgres.ts      # driver Postgres (pg)
   routes/
     ingest.ts        # POST /events
