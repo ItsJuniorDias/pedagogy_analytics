@@ -133,6 +133,14 @@ export function createPostgresStore(): Store {
       })) as StoredEvent[];
     },
 
+    async clear() {
+      const { rows } = await pool.query("SELECT COUNT(*)::int AS c FROM events");
+      const n = Number(rows[0]?.c ?? 0);
+      // TRUNCATE é rápido e RESTART IDENTITY zera o contador do id.
+      await pool.query("TRUNCATE TABLE events RESTART IDENTITY");
+      return n;
+    },
+
     async close() {
       await pool.end();
     },

@@ -82,6 +82,9 @@
     .tag { font-size: 12px; font-weight: 700; color: var(--pink-dark); background: #ffe8ef;
            padding: 2px 8px; border-radius: 8px; }
     .foot { color: var(--muted); font-size: 12px; margin-top: 22px; text-align: center; }
+    .danger { margin-top: 22px; text-align: center; }
+    .danger-btn { background: #fff; color: var(--pink-dark); border: 1.5px solid #ffb8cd; }
+    .danger-btn:hover { background: #ffe8ef; }
     .muted { color: var(--muted); }
   </style>
 </head>
@@ -126,6 +129,10 @@
     <div class="foot">
       Sinal direcional por volume de eventos (design sem PII). Otimize sempre a
       etapa com maior queda. · <span id="drv" class="muted"></span>
+    </div>
+
+    <div class="danger">
+      <button class="danger-btn" onclick="clearDb()">🗑 Limpar todos os eventos</button>
     </div>
   </div>
 
@@ -284,6 +291,26 @@
         const h = await res.json();
         $("drv").textContent = "banco: " + h.driver;
       } catch { /* ignore */ }
+    }
+
+    async function clearDb() {
+      if (!confirm("Apagar TODOS os eventos? Isso é irreversível.")) return;
+      try {
+        const res = await fetch("/admin/clear?confirm=DELETE_ALL", {
+          method: "DELETE",
+          headers: headers(),
+        });
+        if (res.status === 401) {
+          showErr("Não autorizado. Informe o ADMIN_TOKEN (o mesmo do servidor).");
+          return;
+        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const { deleted } = await res.json();
+        alert(`${deleted} evento(s) apagado(s).`);
+        load();
+      } catch (e) {
+        showErr("Falha ao limpar: " + e.message);
+      }
     }
 
     load();

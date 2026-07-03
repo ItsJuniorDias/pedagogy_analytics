@@ -5,6 +5,7 @@ import Fastify from "fastify";
 
 import { config } from "./config";
 import { createStore } from "./db";
+import adminRoutes from "./routes/admin";
 import healthRoutes from "./routes/health";
 import ingestRoutes from "./routes/ingest";
 import statsRoutes from "./routes/stats";
@@ -23,6 +24,7 @@ async function main() {
   await app.register(healthRoutes);
   await app.register(ingestRoutes);
   await app.register(statsRoutes);
+  await app.register(adminRoutes);
 
   // Dashboard: a PÁGINA é pública (só HTML/JS); os dados vêm dos /stats/*, que
   // exigem o token. O JS do dashboard pergunta o token e o envia nas chamadas.

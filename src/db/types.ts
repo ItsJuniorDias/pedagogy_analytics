@@ -53,5 +53,7 @@ export interface Store {
   eventCounts(from: number, to: number): Promise<EventCount[]>;
   revenue(from: number, to: number): Promise<RevenueRow[]>;
   recent(limit: number, offset: number): Promise<StoredEvent[]>;
+  /** Apaga TODOS os eventos e zera o contador de id. Retorna quantos apagou. */
+  clear(): Promise<number>;
   close(): Promise<void>;
 }

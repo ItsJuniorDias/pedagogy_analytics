@@ -134,6 +134,21 @@ export function createSqliteStore(): Store {
       return rows.map((r) => ({ ...r, params: safeParse(r.params) }));
     },
 
+    async clear() {
+      const rows = db
+        .prepare("SELECT COUNT(*) AS c FROM events")
+        .all() as Array<{ c: number }>;
+      const n = Number(rows[0]?.c ?? 0);
+      db.exec("DELETE FROM events");
+      try {
+        // zera o contador do AUTOINCREMENT (id volta a começar em 1)
+        db.exec("DELETE FROM sqlite_sequence WHERE name = 'events'");
+      } catch {
+        /* sqlite_sequence pode não existir ainda; ignora */
+      }
+      return n;
+    },
+
     async close() {
       db.close();
     },

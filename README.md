@@ -72,9 +72,18 @@ Pronto — os eventos passam a chegar. O app já envia o formato certo:
 | `GET`  | `/stats/events` | admin | Contagem por evento. |
 | `GET`  | `/stats/revenue` | admin | Soma de `purchase` por moeda. |
 | `GET`  | `/events` | admin | Eventos crus (debug), paginado. |
+| `DELETE` | `/admin/clear?confirm=DELETE_ALL` | admin | Apaga TODOS os eventos (irreversível). |
 
 Rotas `/stats/*` e `GET /events` aceitam `?from=` e `?to=` (epoch ms **ou** ISO).
 Default: últimos 7 dias. Auth admin via header `Authorization: Bearer <ADMIN_TOKEN>`.
+
+**Limpar o banco** (ex.: apagar os dados de `seed` antes de ir pra produção):
+pelo dashboard, botão *🗑 Limpar todos os eventos*; ou via curl —
+
+```bash
+curl -X DELETE "https://SEU-SERVICO/admin/clear?confirm=DELETE_ALL" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
 
 ---
 
