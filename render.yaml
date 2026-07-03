@@ -1,0 +1,25 @@
+# Deploy 1-clique no Render (New + → Blueprint → aponte pra este repo).
+# Cria o web service + um Postgres grátis e liga o DATABASE_URL sozinho.
+services:
+  - type: web
+    name: pedagogy-analytics
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_TOKEN
+        generateValue: true          # o Render gera um token forte
+      - key: RATE_LIMIT_PER_MIN
+        value: "300"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pedagogy-analytics-db
+          property: connectionString
+
+databases:
+  - name: pedagogy-analytics-db
+    plan: free

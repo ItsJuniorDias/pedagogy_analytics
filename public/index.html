@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pedagogy · Analytics</title>
+  <style>
+    :root {
+      --pink: #ff5b8d;
+      --pink-dark: #c0305a;
+      --green: #2bb673;
+      --cream: #fff9f0;
+      --ink: #2d2d2d;
+      --muted: #8a95a1;
+      --line: #ececec;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--cream);
+      color: var(--ink);
+    }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px 18px 60px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+    header .logo {
+      width: 40px; height: 40px; border-radius: 12px; background: var(--pink);
+      display: flex; align-items: center; justify-content: center; font-size: 22px;
+    }
+    header h1 { font-size: 20px; margin: 0; }
+    header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+    .bar {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      margin: 18px 0; padding: 12px; background: var(--card);
+      border: 1px solid var(--line); border-radius: 16px;
+    }
+    .bar input {
+      flex: 1; min-width: 180px; padding: 9px 12px; border: 1px solid var(--line);
+      border-radius: 10px; font-size: 14px;
+    }
+    button {
+      border: none; border-radius: 10px; padding: 9px 14px; font-size: 14px;
+      font-weight: 700; cursor: pointer; background: #f0f0f0; color: var(--ink);
+    }
+    button.primary { background: var(--pink); color: #fff; }
+    .ranges { display: flex; gap: 6px; }
+    .ranges button.active { background: var(--pink); color: #fff; }
+
+    .msg { padding: 12px 14px; border-radius: 12px; font-size: 14px; margin: 12px 0; display: none; }
+    .msg.err { background: #ffe8ef; color: var(--pink-dark); display: block; }
+
+    h2 { font-size: 15px; color: var(--muted); text-transform: uppercase;
+         letter-spacing: .04em; margin: 26px 0 12px; }
+
+    /* Funil */
+    .funnel { background: var(--card); border: 1px solid var(--line);
+              border-radius: 18px; padding: 18px; }
+    .stage { margin: 10px 0; }
+    .stage .top { display: flex; justify-content: space-between; align-items: baseline; }
+    .stage .label { font-weight: 700; }
+    .stage .count { font-size: 22px; font-weight: 800; }
+    .track { height: 14px; background: #f4f4f6; border-radius: 8px; margin-top: 6px; overflow: hidden; }
+    .fill { height: 100%; border-radius: 8px; background: var(--pink); transition: width .4s; }
+    .drop { text-align: right; font-size: 12px; color: var(--muted); font-weight: 700; margin: 4px 2px 0; }
+    .drop b { color: var(--green); }
+
+    /* Cards */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+    .kpi .n { font-size: 26px; font-weight: 800; }
+    .kpi .k { font-size: 13px; color: var(--muted); font-weight: 700; margin-top: 2px; }
+    .kpi.hl .n { color: var(--pink); }
+
+    table { width: 100%; border-collapse: collapse; background: var(--card);
+            border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 14px; font-size: 14px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    tr:last-child td { border-bottom: none; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .tag { font-size: 12px; font-weight: 700; color: var(--pink-dark); background: #ffe8ef;
+           padding: 2px 8px; border-radius: 8px; }
+    .foot { color: var(--muted); font-size: 12px; margin-top: 22px; text-align: center; }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">🦉</div>
+      <div>
+        <h1>Pedagogy · Analytics</h1>
+        <div class="sub">Funil pré-compra que o RevenueCat não enxerga</div>
+      </div>
+    </header>
+
+    <div class="bar">
+      <input id="token" type="password" placeholder="ADMIN_TOKEN (o mesmo do servidor)" />
+      <button class="primary" onclick="saveToken()">Salvar token</button>
+      <div class="ranges">
+        <button data-range="1" onclick="setRange(1)">24h</button>
+        <button data-range="7" class="active" onclick="setRange(7)">7 dias</button>
+        <button data-range="30" onclick="setRange(30)">30 dias</button>
+      </div>
+      <button onclick="load()">↻ Atualizar</button>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <h2>Funil de conversão</h2>
+    <div class="funnel" id="funnel"><div class="muted">Carregando…</div></div>
+
+    <h2>Resumo</h2>
+    <div class="cards" id="kpis"></div>
+
+    <h2>Receita</h2>
+    <div id="revenue"></div>
+
+    <h2>Eventos mais frequentes</h2>
+    <div id="events"></div>
+
+    <h2>Últimos eventos</h2>
+    <div id="recent"></div>
+
+    <div class="foot">
+      Sinal direcional por volume de eventos (design sem PII). Otimize sempre a
+      etapa com maior queda. · <span id="drv" class="muted"></span>
+    </div>
+  </div>
+
+  <script>
+    let RANGE_DAYS = 7;
+    const $ = (id) => document.getElementById(id);
+    const nf = new Intl.NumberFormat("pt-BR");
+
+    // token persistido no navegador (isto é uma página real, não um artifact)
+    (function initToken() {
+      const t = localStorage.getItem("pedagogy_admin_token");
+      if (t) $("token").value = t;
+    })();
+
+    function saveToken() {
+      localStorage.setItem("pedagogy_admin_token", $("token").value.trim());
+      load();
+    }
+
+    function setRange(d) {
+      RANGE_DAYS = d;
+      document.querySelectorAll(".ranges button").forEach((b) => {
+        b.classList.toggle("active", Number(b.dataset.range) === d);
+      });
+      load();
+    }
+
+    function headers() {
+      const t = ($("token").value || "").trim();
+      return t ? { Authorization: "Bearer " + t } : {};
+    }
+
+    function showErr(text) {
+      const m = $("msg");
+      m.textContent = text;
+      m.className = "msg err";
+    }
+    function clearErr() {
+      $("msg").className = "msg";
+      $("msg").textContent = "";
+    }
+
+    async function load() {
+      clearErr();
+      const to = Date.now();
+      const from = to - RANGE_DAYS * 24 * 60 * 60 * 1000;
+      try {
+        const res = await fetch(`/stats/overview?from=${from}&to=${to}`, {
+          headers: headers(),
+        });
+        if (res.status === 401) {
+          showErr("Não autorizado. Informe o ADMIN_TOKEN (o mesmo definido no servidor).");
+          return;
+        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        renderFunnel(data.funnel);
+        renderKpis(data.funnel, data.revenue);
+        renderRevenue(data.revenue);
+        renderEvents(data.events);
+        loadRecent(from, to);
+        loadHealth();
+      } catch (e) {
+        showErr("Falha ao carregar: " + e.message);
+      }
+    }
+
+    function renderFunnel(f) {
+      const s = f.stages;
+      const max = Math.max(s.paywall_view, 1);
+      const w = (n) => Math.max(2, Math.round((n / max) * 100)) + "%";
+      $("funnel").innerHTML = `
+        ${stageRow("👀 Paywall visto", s.paywall_view, w(s.paywall_view))}
+        <div class="drop">↓ ${f.rates.viewToCheckout}% seguiram para o checkout</div>
+        ${stageRow("🛒 Checkout iniciado", s.checkout_initiated, w(s.checkout_initiated))}
+        <div class="drop">↓ <b>${f.rates.checkoutToConvert}%</b> converteram</div>
+        ${stageRow("🎉 Assinaturas/trials", s.converted, w(s.converted))}
+      `;
+    }
+    function stageRow(label, count, width) {
+      return `
+        <div class="stage">
+          <div class="top"><span class="label">${label}</span>
+            <span class="count">${nf.format(count)}</span></div>
+          <div class="track"><div class="fill" style="width:${width}"></div></div>
+        </div>`;
+    }
+
+    function renderKpis(f, revenue) {
+      const totalRev = (revenue || []).reduce((a, r) => a + r.total, 0);
+      const cur = (revenue && revenue[0] && revenue[0].currency) || "";
+      const revStr = revenue && revenue.length
+        ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: cur }).format(
+            (revenue.find((r) => r.currency === cur) || {}).total || 0)
+        : "—";
+      $("kpis").innerHTML = `
+        ${kpi(nf.format(f.stages.paywall_view), "Paywall views")}
+        ${kpi(f.rates.viewToConvert + "%", "Conversão geral", true)}
+        ${kpi(nf.format(f.stages.converted), "Assinaturas + trials")}
+        ${kpi(revStr, "Receita (" + (cur || "—") + ")")}
+      `;
+    }
+    function kpi(n, k, hl) {
+      return `<div class="kpi ${hl ? "hl" : ""}"><div class="n">${n}</div><div class="k">${k}</div></div>`;
+    }
+
+    function renderRevenue(rows) {
+      if (!rows || !rows.length) {
+        $("revenue").innerHTML = `<div class="kpi"><span class="muted">Sem eventos de compra no período.</span></div>`;
+        return;
+      }
+      $("revenue").innerHTML = `
+        <table><thead><tr><th>Moeda</th><th class="num">Total</th><th class="num">Compras</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr>
+          <td>${r.currency}</td>
+          <td class="num">${new Intl.NumberFormat("pt-BR", { style: "currency", currency: r.currency }).format(r.total)}</td>
+          <td class="num">${nf.format(r.count)}</td></tr>`).join("")}</tbody></table>`;
+    }
+
+    function renderEvents(rows) {
+      if (!rows || !rows.length) {
+        $("events").innerHTML = `<div class="kpi"><span class="muted">Nenhum evento no período.</span></div>`;
+        return;
+      }
+      $("events").innerHTML = `
+        <table><thead><tr><th>Evento</th><th class="num">Contagem</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr>
+          <td><span class="tag">${r.event}</span></td>
+          <td class="num">${nf.format(r.count)}</td></tr>`).join("")}</tbody></table>`;
+    }
+
+    async function loadRecent(from, to) {
+      try {
+        const res = await fetch(`/events?limit=15`, { headers: headers() });
+        if (!res.ok) { $("recent").innerHTML = ""; return; }
+        const { events } = await res.json();
+        if (!events || !events.length) { $("recent").innerHTML = `<div class="kpi"><span class="muted">Vazio.</span></div>`; return; }
+        $("recent").innerHTML = `
+          <table><thead><tr><th>Quando</th><th>Evento</th><th>Params</th></tr></thead>
+          <tbody>${events.map((e) => `<tr>
+            <td class="muted">${new Date(e.ts).toLocaleString("pt-BR")}</td>
+            <td><span class="tag">${e.event}</span></td>
+            <td class="muted">${shortParams(e.params)}</td></tr>`).join("")}</tbody></table>`;
+      } catch { $("recent").innerHTML = ""; }
+    }
+    function shortParams(p) {
+      try {
+        const s = JSON.stringify(p);
+        return s.length > 80 ? s.slice(0, 80) + "…" : s;
+      } catch { return ""; }
+    }
+
+    async function loadHealth() {
+      try {
+        const res = await fetch("/health");
+        const h = await res.json();
+        $("drv").textContent = "banco: " + h.driver;
+      } catch { /* ignore */ }
+    }
+
+    load();
+  </script>
+</body>
+</html>
