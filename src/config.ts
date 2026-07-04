@@ -9,6 +9,12 @@ export interface Config {
   dbPath: string;
   rateLimitPerMin: number;
   corsOrigin: string;
+  // Meta Conversions API (CAPI)
+  metaDatasetId: string | null;
+  metaCapiToken: string | null;
+  metaApiVersion: string;
+  metaTestEventCode: string | null;
+  metaCapiEnabled: boolean;
 }
 
 export const config: Config = {
@@ -21,6 +27,14 @@ export const config: Config = {
   dbPath: process.env.DB_PATH?.trim() || "./data/analytics.db",
   rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 300),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
+  metaDatasetId: process.env.META_DATASET_ID?.trim() || null,
+  metaCapiToken: process.env.META_CAPI_TOKEN?.trim() || null,
+  metaApiVersion: process.env.META_API_VERSION?.trim() || "v25.0",
+  metaTestEventCode: process.env.META_TEST_EVENT_CODE?.trim() || null,
+  metaCapiEnabled: Boolean(
+    (process.env.META_DATASET_ID?.trim() || null) &&
+      (process.env.META_CAPI_TOKEN?.trim() || null),
+  ),
 };
 
 export const isProd = config.nodeEnv === "production";

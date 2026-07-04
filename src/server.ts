@@ -5,6 +5,7 @@ import Fastify from "fastify";
 
 import { config } from "./config";
 import { createStore } from "./db";
+import { MetaCapi } from "./lib/metaCapi";
 import adminRoutes from "./routes/admin";
 import healthRoutes from "./routes/health";
 import ingestRoutes from "./routes/ingest";
@@ -20,6 +21,26 @@ async function main() {
   const store = createStore();
   await store.init();
   app.decorate("store", store);
+
+  // Meta Conversions API (CAPI). Se faltar token, entra em modo no-op — nada quebra.
+  const metaCapi = new MetaCapi({
+    datasetId: config.metaDatasetId ?? "",
+    accessToken: config.metaCapiToken ?? "",
+    apiVersion: config.metaApiVersion,
+    testEventCode: config.metaTestEventCode,
+    enabled: config.metaCapiEnabled,
+    logger: {
+      info: (o, m) => app.log.info(o as object, m),
+      warn: (o, m) => app.log.warn(o as object, m),
+      error: (o, m) => app.log.error(o as object, m),
+    },
+  });
+  app.decorate("metaCapi", metaCapi);
+  if (config.metaCapiEnabled) {
+    app.log.info(`[CAPI] ativo (dataset=${config.metaDatasetId})`);
+  } else {
+    app.log.warn("[CAPI] desativado — defina META_DATASET_ID e META_CAPI_TOKEN");
+  }
 
   await app.register(healthRoutes);
   await app.register(ingestRoutes);
