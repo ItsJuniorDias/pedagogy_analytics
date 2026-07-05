@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import { config } from "../config";
 import type { EventInput } from "../db/types";
+import { mirrorEventsToMeta } from "../lib/capiMirror";
 import { rateLimit } from "../lib/ratelimit";
 
 // Máximo de eventos por requisição (o app manda 1 por vez, mas aceitamos lote).
@@ -61,6 +62,12 @@ export default async function ingestRoutes(app: FastifyInstance) {
       req.log.error(err, "falha ao gravar eventos");
       return reply.code(500).send({ error: "Erro ao gravar eventos." });
     }
+
+    // Espelha p/ o Meta CAPI (best-effort — não bloqueia nem derruba o /events).
+    void mirrorEventsToMeta(app, events, {
+      ip: req.ip,
+      userAgent: (req.headers["user-agent"] as string | undefined) ?? null,
+    }).catch((err) => req.log.error(err, "[CAPI] espelhamento falhou"));
 
     return reply.code(202).send({ ok: true, accepted: events.length });
   });
