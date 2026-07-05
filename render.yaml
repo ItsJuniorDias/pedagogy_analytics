@@ -19,15 +19,6 @@ services:
         fromDatabase:
           name: pedagogy-analytics-db
           property: connectionString
-      # ---- Meta Conversions API (CAPI) ----
-      - key: META_DATASET_ID
-        value: "967920369353096"   # ID do pixel (Kid's learning Book app)
-      - key: META_API_VERSION
-        value: "v25.0"
-      - key: META_CAPI_TOKEN
-        sync: false                # cole o System User token no painel do Render
-      - key: META_TEST_EVENT_CODE
-        sync: false                # opcional; só durante testes, depois remova
 
 databases:
   - name: pedagogy-analytics-db
