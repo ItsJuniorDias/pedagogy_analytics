@@ -2,9 +2,20 @@ import { mkdirSync } from "fs";
 import { dirname } from "path";
 
 import { config } from "../config";
+import { buildCountryRows } from "../lib/country";
+import {
+  CONVERSION_EVENTS,
+  EVENT,
+  FUNNEL_EVENTS,
+  MONETARY_EVENTS,
+  REVENUE_EVENTS,
+  TRIAL_EVENTS,
+  sqlList,
+} from "../lib/events";
 import { extractColumns } from "../lib/extract";
 import { buildFunnel } from "../lib/funnel";
 import type {
+  CountryRow,
   EventCount,
   EventInput,
   RevenueRow,
@@ -47,10 +58,24 @@ export function createSqliteStore(): Store {
           product_id  TEXT,
           currency    TEXT,
           value       REAL,
-          source      TEXT
+          source      TEXT,
+          country     TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_events_event ON events(event);
-        CREATE INDEX IF NOT EXISTS idx_events_ts    ON events(ts);
+      `);
+
+      // Migração p/ bancos criados antes da coluna de país. O SQLite não tem
+      // `ADD COLUMN IF NOT EXISTS`, então perguntamos ao PRAGMA primeiro.
+      const cols = db.prepare(`PRAGMA table_info(events)`).all() as Array<{
+        name: string;
+      }>;
+      if (!cols.some((c) => c.name === "country")) {
+        db.exec(`ALTER TABLE events ADD COLUMN country TEXT`);
+      }
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_events_event   ON events(event);
+        CREATE INDEX IF NOT EXISTS idx_events_ts      ON events(ts);
+        CREATE INDEX IF NOT EXISTS idx_events_country ON events(country);
       `);
     },
 
@@ -58,8 +83,8 @@ export function createSqliteStore(): Store {
       if (events.length === 0) return 0;
       const stmt = db.prepare(
         `INSERT INTO events
-           (event, params, ts, received_at, product_id, currency, value, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (event, params, ts, received_at, product_id, currency, value, source, country)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       db.exec("BEGIN");
       try {
@@ -74,6 +99,7 @@ export function createSqliteStore(): Store {
             c.currency,
             c.value,
             c.source,
+            e.country,
           );
         }
         db.exec("COMMIT");
@@ -89,7 +115,7 @@ export function createSqliteStore(): Store {
         .prepare(
           `SELECT event, COUNT(*) AS c FROM events
            WHERE ts >= ? AND ts <= ?
-             AND event IN ('paywall_view','checkout_initiated','subscribe','start_trial')
+             AND event IN (${sqlList(FUNNEL_EVENTS)})
            GROUP BY event`,
         )
         .all(from, to) as Array<{ event: string; c: number }>;
@@ -110,19 +136,62 @@ export function createSqliteStore(): Store {
     },
 
     async revenue(from, to) {
+      // Antes: `WHERE event = 'purchase'` — nome que o app nunca emitiu, então
+      // a receita era sempre zero. Mesma query do driver Postgres, de propósito.
       const rows = db
         .prepare(
-          `SELECT currency, SUM(value) AS total, COUNT(*) AS count FROM events
-           WHERE event = 'purchase' AND ts >= ? AND ts <= ?
+          `SELECT currency,
+                  SUM(CASE WHEN event IN (${sqlList(REVENUE_EVENTS)}) THEN value ELSE 0 END) AS total,
+                  SUM(CASE WHEN event IN (${sqlList(REVENUE_EVENTS)}) THEN 1 ELSE 0 END) AS count,
+                  SUM(CASE WHEN event IN (${sqlList(TRIAL_EVENTS)}) THEN 1 ELSE 0 END) AS trials,
+                  SUM(CASE WHEN event IN (${sqlList(TRIAL_EVENTS)}) THEN value ELSE 0 END) AS trial_value
+           FROM events
+           WHERE ts >= ? AND ts <= ?
+             AND event IN (${sqlList(MONETARY_EVENTS)})
              AND value IS NOT NULL AND currency IS NOT NULL
            GROUP BY currency ORDER BY total DESC`,
         )
-        .all(from, to) as Array<{ currency: string; total: number; count: number }>;
+        .all(from, to) as Array<{
+        currency: string;
+        total: number;
+        count: number;
+        trials: number;
+        trial_value: number;
+      }>;
       return rows.map((r) => ({
         currency: r.currency,
-        total: Number(r.total),
+        total: Number(r.total ?? 0),
         count: Number(r.count),
+        trials: Number(r.trials),
+        trialValue: Number(r.trial_value ?? 0),
       })) as RevenueRow[];
+    },
+
+    async countries(from, to): Promise<CountryRow[]> {
+      const rows = db
+        .prepare(
+          `SELECT country,
+                  COUNT(*) AS events,
+                  SUM(CASE WHEN event = '${EVENT.paywallView}' THEN 1 ELSE 0 END) AS paywall_views,
+                  SUM(CASE WHEN event IN (${sqlList(CONVERSION_EVENTS)}) THEN 1 ELSE 0 END) AS converted
+           FROM events
+           WHERE ts >= ? AND ts <= ?
+           GROUP BY country`,
+        )
+        .all(from, to) as Array<{
+        country: string | null;
+        events: number;
+        paywall_views: number;
+        converted: number;
+      }>;
+      return buildCountryRows(
+        rows.map((r) => ({
+          country: r.country ?? null,
+          events: Number(r.events),
+          paywall_views: Number(r.paywall_views),
+          converted: Number(r.converted),
+        })),
+      );
     },
 
     async recent(limit, offset) {

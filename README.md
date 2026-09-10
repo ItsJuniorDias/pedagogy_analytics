@@ -67,10 +67,11 @@ Pronto — os eventos passam a chegar. O app já envia o formato certo:
 | `POST` | `/events` | opcional (`INGEST_TOKEN`) | Ingesta 1 evento **ou** um array (até 50). |
 | `GET`  | `/health` | pública | Status + driver do banco (Render usa). |
 | `GET`  | `/` | pública | Dashboard (dados vêm dos `/stats/*` com token). |
-| `GET`  | `/stats/overview` | admin | Funil + eventos + receita de uma vez. |
+| `GET`  | `/stats/overview` | admin | Funil + eventos + receita + países de uma vez. |
 | `GET`  | `/stats/funnel` | admin | Só o funil e as taxas. |
 | `GET`  | `/stats/events` | admin | Contagem por evento. |
-| `GET`  | `/stats/revenue` | admin | Soma de `purchase` por moeda. |
+| `GET`  | `/stats/revenue` | admin | Receita paga por moeda + trials à parte. |
+| `GET`  | `/stats/countries` | admin | Países com bandeira, volume e conversão. |
 | `GET`  | `/events` | admin | Eventos crus (debug), paginado. |
 | `DELETE` | `/admin/clear?confirm=DELETE_ALL` | admin | Apaga TODOS os eventos (irreversível). |
 
@@ -82,6 +83,97 @@ pelo dashboard, botão *🗑 Limpar todos os eventos*; ou via curl —
 
 ```bash
 curl -X DELETE "https://SEU-SERVICO/admin/clear?confirm=DELETE_ALL" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+---
+
+## Receita: por que trial não entra
+
+A query de receita filtrava por `event = 'purchase'` — um nome que **nenhuma
+parte do sistema emitia**. O app manda `subscribe`, o funil conta `subscribe`,
+o Meta CAPI espelha `subscribe`. Resultado: o funil dizia "3 assinaturas" e o
+card de receita dizia "R$ 0,00" ao mesmo tempo.
+
+O conserto soma `subscribe` (+ `purchase`, mantido só para não apagar linhas de
+bancos antigos). **`start_trial` ficou de fora de propósito.**
+
+O motivo está no app: `PaywallView.swift:309` manda o **preço cheio** do produto
+no `value` do trial, porque é isso que o Meta CAPI precisa para otimizar
+campanha. Somar esse valor na receita contaria como pago um dinheiro que
+ninguém pagou — e que boa parte nunca vai pagar, já que trial tem cancelamento.
+Um trial vira receita quando renova, e a renovação chega como `subscribe`.
+
+Por isso `/stats/revenue` devolve quatro campos por moeda:
+
+| Campo | O que é |
+|---|---|
+| `total` | Receita realizada (`subscribe` + `purchase`). |
+| `count` | Nº de assinaturas pagas. |
+| `trials` | Nº de trials iniciados. Não entram em `total`. |
+| `trialValue` | Quanto os trials somariam se **todos** renovassem. É teto, não previsão. |
+
+Isso explica a diferença que você vai ver no dashboard: "Assinaturas + trials"
+no funil é maior que "Compras" na receita. Os dois estão certos — o funil mede
+quem chegou ao fim, a receita mede quem pagou.
+
+**Nomes de evento agora vivem em `src/lib/events.ts`.** Os dois drivers importam
+de lá em vez de repetir a string no SQL. O bug acima só passou despercebido
+porque cada arquivo tinha a sua própria cópia de `'purchase'`.
+
+⚠️ **Se você já rodou `npm run seed` contra o banco de produção**, ele gravava
+`subscribe` *e* `purchase` para a mesma venda simulada — com a query nova isso
+conta duas vezes. O `seed.ts` foi corrigido, mas as linhas antigas continuam lá:
+limpe com o botão *🗑 Limpar todos os eventos* antes de olhar número pra valer.
+
+---
+
+## Países
+
+O relatório de países sai de duas letras por evento — o IP **não** é lido, não é
+logado e não é gravado em lugar nenhum.
+
+**De onde vem.** A Cloudflare fica na frente do Render e resolve o IP em país
+antes da requisição chegar aqui, entregando o resultado no header
+`cf-ipcountry`. O `ingest.ts` lê esse header, valida que são duas letras ISO
+3166-1 e guarda numa coluna `country`. `XX` (não determinado) e `T1` (Tor) são
+descartados — não são países, e virariam nações fantasma no relatório.
+
+**Nada muda no app.** Como a resolução é no servidor, isso funciona para quem
+já tem o app instalado, sem submissão nova e sem esperar review. A postura de
+privacidade também não muda: o app continua sem coletar localização, e a
+granularidade "país" não está ligada a nenhum identificador — não existe user
+id neste backend.
+
+**Override pelo app (opcional, e melhor).** Se `params.country` vier no evento,
+ele ganha do header. Isso já está implementado esperando o dia em que você
+mandar o storefront do StoreKit:
+
+```swift
+// no PaywallView, junto dos outros params
+"country": await Storefront.current?.countryCode ?? ""
+```
+
+A diferença importa: o header diz de onde a pessoa **abriu** o app; o storefront
+diz onde ela **paga**. Um brasileiro morando em Lisboa aparece como 🇵🇹 pelo
+header e 🇵🇹 ou 🇧🇷 pelo storefront, dependendo da conta Apple dele — e é o
+storefront que determina em que moeda a venda entra.
+
+**Bandeira sem tabela.** Emoji de bandeira é o par de Regional Indicator Symbols
+das letras do código: `BR` → 🇧🇷 é aritmética sobre code points, não lookup. O
+nome do país vem do `Intl.DisplayNames` em pt-BR ("Brasil", "Estados Unidos").
+Zero dependência nova, zero lista pra manter.
+
+**Eventos antigos.** A coluna é nova; tudo que já estava gravado tem
+`country NULL` e aparece agrupado como 🏳️ Desconhecido. Isso é a verdade e não
+zero — e o número vai encolhendo sozinho conforme os eventos novos chegam.
+
+**Taxa com piso de amostra.** O dashboard mostra "—" em vez da porcentagem para
+países com menos de 10 paywall views. Com 2 views e 1 assinatura, "50%" é ruído
+que convida a decidir errado.
+
+```bash
+curl -s "https://SEU-SERVICO/stats/countries" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
@@ -172,6 +264,7 @@ src/
     stats.ts         # GET /stats/* e GET /events
     health.ts        # GET /health
   lib/
+    country.ts       # normaliza ISO, bandeira por code point, nome via Intl
     funnel.ts        # monta o funil a partir das contagens
     extract.ts       # extrai product_id/currency/value/source do params
     auth.ts          # guard do ADMIN_TOKEN

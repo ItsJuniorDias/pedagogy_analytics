@@ -1,4 +1,5 @@
 import type { FunnelResult } from "../db/types";
+import { EVENT } from "./events";
 
 // Monta o funil a partir das contagens brutas por evento.
 //
@@ -11,9 +12,12 @@ export function buildFunnel(
   to: number,
   counts: Record<string, number>,
 ): FunnelResult {
-  const view = counts["paywall_view"] ?? 0;
-  const checkout = counts["checkout_initiated"] ?? 0;
-  const converted = (counts["subscribe"] ?? 0) + (counts["start_trial"] ?? 0);
+  const view = counts[EVENT.paywallView] ?? 0;
+  const checkout = counts[EVENT.checkoutInitiated] ?? 0;
+  // subscribe + start_trial: os dois fecharam o funil. Se você quiser separar
+  // pago de trial, o número está em /stats/revenue (campos count e trials) —
+  // aqui não, porque "converteu" no funil é chegar até o fim.
+  const converted = (counts[EVENT.subscribe] ?? 0) + (counts[EVENT.startTrial] ?? 0);
 
   const pct = (a: number, b: number) =>
     b > 0 ? Math.round((a / b) * 1000) / 10 : 0;

@@ -81,6 +81,18 @@
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     .tag { font-size: 12px; font-weight: 700; color: var(--pink-dark); background: #ffe8ef;
            padding: 2px 8px; border-radius: 8px; }
+
+    /* Países */
+    .flag { font-size: 20px; line-height: 1; margin-right: 8px;
+            /* Fontes de bandeira variam de largura entre plataformas; largura
+               fixa mantém os nomes alinhados na coluna. */
+            display: inline-block; width: 26px; text-align: center; }
+    .cty { display: flex; align-items: center; }
+    .cty .code { color: var(--muted); font-size: 12px; font-weight: 700; margin-left: 6px; }
+    td.rate { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+    td.rate.good { color: var(--green); }
+    td.rate.zero { color: var(--muted); font-weight: 600; }
+    tr.unknown td { background: #fcfcfd; }
     .foot { color: var(--muted); font-size: 12px; margin-top: 22px; text-align: center; }
     .danger { margin-top: 22px; text-align: center; }
     .danger-btn { background: #fff; color: var(--pink-dark); border: 1.5px solid #ffb8cd; }
@@ -119,6 +131,9 @@
 
     <h2>Receita</h2>
     <div id="revenue"></div>
+
+    <h2>Países</h2>
+    <div id="countries"></div>
 
     <h2>Eventos mais frequentes</h2>
     <div id="events"></div>
@@ -190,8 +205,9 @@
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         renderFunnel(data.funnel);
-        renderKpis(data.funnel, data.revenue);
+        renderKpis(data.funnel, data.revenue, data.countries);
         renderRevenue(data.revenue);
+        renderCountries(data.countries);
         renderEvents(data.events);
         loadRecent(from, to);
         loadHealth();
@@ -221,20 +237,41 @@
         </div>`;
     }
 
-    function renderKpis(f, revenue) {
-      const totalRev = (revenue || []).reduce((a, r) => a + r.total, 0);
-      const cur = (revenue && revenue[0] && revenue[0].currency) || "";
-      const revStr = revenue && revenue.length
-        ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: cur }).format(
-            (revenue.find((r) => r.currency === cur) || {}).total || 0)
-        : "—";
+    function renderKpis(f, revenue, countries) {
+      // Não existe "receita total": somar BRL com USD não dá número nenhum.
+      // O card mostra a MAIOR moeda e avisa quantas outras existem — agora que
+      // o app vende em vários países, isso deixou de ser detalhe.
+      const rev = (revenue || []).slice().sort((a, b) => b.total - a.total);
+      const top = rev[0];
+      const cur = top ? top.currency : "";
+      const revStr = top ? money(top.total, cur) : "—";
+      const revLabel = rev.length > 1
+        ? `Receita (${cur} +${rev.length - 1})`
+        : `Receita (${cur || "—"})`;
+      // Só conta país identificado — "Desconhecido" não é um país a mais.
+      const known = (countries || []).filter((c) => c.code);
+      const top = known[0];
+      const topStr = top ? top.flag + " " + top.name : "—";
+
       $("kpis").innerHTML = `
         ${kpi(nf.format(f.stages.paywall_view), "Paywall views")}
         ${kpi(f.rates.viewToConvert + "%", "Conversão geral", true)}
         ${kpi(nf.format(f.stages.converted), "Assinaturas + trials")}
-        ${kpi(revStr, "Receita (" + (cur || "—") + ")")}
+        ${kpi(revStr, revLabel)}
+        ${kpi(nf.format(known.length), "Países alcançados")}
+        ${kpi(topStr, "Maior audiência")}
       `;
     }
+    function money(v, cur) {
+      if (!cur) return "—";
+      try {
+        return new Intl.NumberFormat("pt-BR", { style: "currency", currency: cur }).format(v || 0);
+      } catch {
+        // Moeda que o Intl não conhece: mostra o número cru em vez de quebrar.
+        return (v || 0).toFixed(2) + " " + cur;
+      }
+    }
+
     function kpi(n, k, hl) {
       return `<div class="kpi ${hl ? "hl" : ""}"><div class="n">${n}</div><div class="k">${k}</div></div>`;
     }
@@ -244,12 +281,78 @@
         $("revenue").innerHTML = `<div class="kpi"><span class="muted">Sem eventos de compra no período.</span></div>`;
         return;
       }
+      const anyTrial = rows.some((r) => r.trials > 0);
       $("revenue").innerHTML = `
-        <table><thead><tr><th>Moeda</th><th class="num">Total</th><th class="num">Compras</th></tr></thead>
-        <tbody>${rows.map((r) => `<tr>
-          <td>${r.currency}</td>
-          <td class="num">${new Intl.NumberFormat("pt-BR", { style: "currency", currency: r.currency }).format(r.total)}</td>
-          <td class="num">${nf.format(r.count)}</td></tr>`).join("")}</tbody></table>`;
+        <table>
+          <thead><tr>
+            <th>Moeda</th>
+            <th class="num">Receita</th>
+            <th class="num">Compras</th>
+            <th class="num">Trials</th>
+          </tr></thead>
+          <tbody>${rows.map((r) => `<tr>
+            <td>${esc(r.currency)}</td>
+            <td class="num">${money(r.total, r.currency)}</td>
+            <td class="num">${nf.format(r.count)}</td>
+            <td class="num">${r.trials ? nf.format(r.trials) + ` <span class="muted">(${money(r.trialValue, r.currency)})</span>` : "—"}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+        <div class="foot" style="text-align:left;margin-top:8px">
+          Receita = <b>assinaturas pagas</b>. Trials aparecem à parte porque valem
+          R$&nbsp;0,00 hoje${anyTrial ? " — o valor entre parênteses é o teto, se todos renovarem" : ""}.
+          Um trial vira receita quando renova, e a renovação chega como
+          <code>subscribe</code>. Isso explica por que “Assinaturas + trials” no
+          funil pode ser maior que “Compras” aqui.
+        </div>`;
+    }
+
+    function renderCountries(rows) {
+      if (!rows || !rows.length) {
+        $("countries").innerHTML = `<div class="kpi"><span class="muted">Nenhum evento no período.</span></div>`;
+        return;
+      }
+
+      // A taxa só significa alguma coisa com volume atrás. Com 2 paywall views
+      // e 1 assinatura, "50%" é ruído — o dashboard mostra "—" em vez de um
+      // número que convida a uma decisão errada.
+      const MIN_VIEWS = 10;
+
+      $("countries").innerHTML = `
+        <table>
+          <thead><tr>
+            <th>País</th>
+            <th class="num">Paywall</th>
+            <th class="num">Assinaturas</th>
+            <th class="num">Conversão</th>
+          </tr></thead>
+          <tbody>${rows.map((c) => {
+            const enough = c.paywall_views >= MIN_VIEWS;
+            const cls = !enough ? "zero" : c.converted > 0 ? "good" : "zero";
+            const rate = enough ? c.rate + "%" : "—";
+            return `<tr class="${c.code ? "" : "unknown"}">
+              <td><span class="cty"><span class="flag">${c.flag}</span>${esc(c.name)}${
+                c.code ? `<span class="code">${c.code}</span>` : ""
+              }</span></td>
+              <td class="num">${nf.format(c.paywall_views)}</td>
+              <td class="num">${nf.format(c.converted)}</td>
+              <td class="rate ${cls}">${rate}</td>
+            </tr>`;
+          }).join("")}</tbody>
+        </table>
+        <div class="foot" style="text-align:left;margin-top:8px">
+          Conversão = assinaturas ÷ paywall views. Países com menos de ${MIN_VIEWS}
+          views mostram “—”: amostra pequena demais pra taxa significar algo.
+          “Desconhecido” é evento cujo país a borda não resolveu — VPN, proxy, ou
+          registro anterior a este relatório.
+        </div>`;
+    }
+
+    // Os nomes vêm do Intl no servidor, não do usuário — mas isto aqui monta
+    // HTML por concatenação, e escapar é mais barato que confiar.
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[ch]);
     }
 
     function renderEvents(rows) {

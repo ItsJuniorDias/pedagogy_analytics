@@ -1,9 +1,20 @@
 import { Pool } from "pg";
 
 import { config } from "../config";
+import { buildCountryRows } from "../lib/country";
+import {
+  CONVERSION_EVENTS,
+  EVENT,
+  FUNNEL_EVENTS,
+  MONETARY_EVENTS,
+  REVENUE_EVENTS,
+  TRIAL_EVENTS,
+  sqlList,
+} from "../lib/events";
 import { extractColumns } from "../lib/extract";
 import { buildFunnel } from "../lib/funnel";
 import type {
+  CountryRow,
   EventCount,
   EventInput,
   RevenueRow,
@@ -35,14 +46,24 @@ export function createPostgresStore(): Store {
           product_id  TEXT,
           currency    TEXT,
           value       DOUBLE PRECISION,
-          source      TEXT
+          source      TEXT,
+          country     TEXT
         );
       `);
+      // Migração p/ bancos que já existiam antes da coluna de país.
+      // Os eventos antigos ficam com country NULL e aparecem como
+      // "Desconhecido" no relatório — o que é a verdade, e não zero.
+      await pool.query(
+        `ALTER TABLE events ADD COLUMN IF NOT EXISTS country TEXT;`,
+      );
       await pool.query(
         `CREATE INDEX IF NOT EXISTS idx_events_event ON events(event);`,
       );
       await pool.query(
         `CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);`,
+      );
+      await pool.query(
+        `CREATE INDEX IF NOT EXISTS idx_events_country ON events(country);`,
       );
     },
 
@@ -55,8 +76,8 @@ export function createPostgresStore(): Store {
           const c = extractColumns(e.params);
           await client.query(
             `INSERT INTO events
-               (event, params, ts, received_at, product_id, currency, value, source)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+               (event, params, ts, received_at, product_id, currency, value, source, country)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [
               e.event,
               JSON.stringify(e.params ?? {}),
@@ -66,6 +87,7 @@ export function createPostgresStore(): Store {
               c.currency,
               c.value,
               c.source,
+              e.country,
             ],
           );
         }
@@ -83,7 +105,7 @@ export function createPostgresStore(): Store {
       const { rows } = await pool.query(
         `SELECT event, COUNT(*)::int AS c FROM events
          WHERE ts >= $1 AND ts <= $2
-           AND event IN ('paywall_view','checkout_initiated','subscribe','start_trial')
+           AND event IN (${sqlList(FUNNEL_EVENTS)})
          GROUP BY event`,
         [from, to],
       );
@@ -106,18 +128,52 @@ export function createPostgresStore(): Store {
     },
 
     async revenue(from, to) {
+      // Antes: `WHERE event = 'purchase'` — nome que o app nunca emitiu, então
+      // a receita era sempre zero. Agora soma os eventos de REVENUE_EVENTS e
+      // conta os trials numa coluna separada, sem misturar os dois.
       const { rows } = await pool.query(
-        `SELECT currency, SUM(value) AS total, COUNT(*)::int AS count FROM events
-         WHERE event = 'purchase' AND ts >= $1 AND ts <= $2
+        `SELECT currency,
+                SUM(CASE WHEN event IN (${sqlList(REVENUE_EVENTS)}) THEN value ELSE 0 END) AS total,
+                SUM(CASE WHEN event IN (${sqlList(REVENUE_EVENTS)}) THEN 1 ELSE 0 END)::int AS count,
+                SUM(CASE WHEN event IN (${sqlList(TRIAL_EVENTS)}) THEN 1 ELSE 0 END)::int AS trials,
+                SUM(CASE WHEN event IN (${sqlList(TRIAL_EVENTS)}) THEN value ELSE 0 END) AS trial_value
+         FROM events
+         WHERE ts >= $1 AND ts <= $2
+           AND event IN (${sqlList(MONETARY_EVENTS)})
            AND value IS NOT NULL AND currency IS NOT NULL
          GROUP BY currency ORDER BY total DESC`,
         [from, to],
       );
       return rows.map((r) => ({
         currency: r.currency as string,
-        total: Number(r.total),
+        total: Number(r.total ?? 0),
         count: Number(r.count),
+        trials: Number(r.trials),
+        trialValue: Number(r.trial_value ?? 0),
       })) as RevenueRow[];
+    },
+
+    async countries(from, to): Promise<CountryRow[]> {
+      // SUM(CASE) em vez de COUNT(*) FILTER: o SQL fica idêntico ao do driver
+      // SQLite, então os dois relatórios não podem divergir por dialeto.
+      const { rows } = await pool.query(
+        `SELECT country,
+                COUNT(*)::int AS events,
+                SUM(CASE WHEN event = '${EVENT.paywallView}' THEN 1 ELSE 0 END)::int AS paywall_views,
+                SUM(CASE WHEN event IN (${sqlList(CONVERSION_EVENTS)}) THEN 1 ELSE 0 END)::int AS converted
+         FROM events
+         WHERE ts >= $1 AND ts <= $2
+         GROUP BY country`,
+        [from, to],
+      );
+      return buildCountryRows(
+        rows.map((r) => ({
+          country: (r.country as string | null) ?? null,
+          events: Number(r.events),
+          paywall_views: Number(r.paywall_views),
+          converted: Number(r.converted),
+        })),
+      );
     },
 
     async recent(limit, offset) {

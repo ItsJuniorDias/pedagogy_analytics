@@ -22,15 +22,23 @@ export default async function statsRoutes(app: FastifyInstance) {
     return { from, to, revenue: await app.store.revenue(from, to) };
   });
 
+  // Países, do maior volume de paywall_view pro menor. Cada linha já vem com
+  // bandeira e nome — o cliente não precisa de tabela de países.
+  app.get("/stats/countries", guard, async (req) => {
+    const { from, to } = range(req);
+    return { from, to, countries: await app.store.countries(from, to) };
+  });
+
   // Tudo de uma vez — é o que o dashboard consome.
   app.get("/stats/overview", guard, async (req) => {
     const { from, to } = range(req);
-    const [funnel, events, revenue] = await Promise.all([
+    const [funnel, events, revenue, countries] = await Promise.all([
       app.store.funnel(from, to),
       app.store.eventCounts(from, to),
       app.store.revenue(from, to),
+      app.store.countries(from, to),
     ]);
-    return { from, to, funnel, events, revenue };
+    return { from, to, funnel, events, revenue, countries };
   });
 
   // Eventos crus (debug).
