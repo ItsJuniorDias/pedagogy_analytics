@@ -88,6 +88,24 @@ curl -X DELETE "https://SEU-SERVICO/admin/clear?confirm=DELETE_ALL" \
 
 ---
 
+## Checar o dashboard antes de subir
+
+```bash
+npm run check:dashboard
+```
+
+O `public/index.html` é a única parte do projeto que o TypeScript **não** olha:
+é JS solto dentro de uma tag `<script>`, servido como string pelo `server.ts`.
+`npm run build` passa, o deploy sobe verde, e a página quebra em silêncio — um
+erro de sintaxe ali mata o script inteiro, então nem o `try/catch` do `load()`
+roda e nenhuma mensagem de erro aparece. O sintoma é o funil preso em
+"Carregando…" com todas as outras seções vazias.
+
+O script roda o `<script>` da página num `vm` com DOM e `fetch` falsos, e falha
+se qualquer seção ficar vazia ou travada. Rode junto do `typecheck`.
+
+---
+
 ## Receita: por que trial não entra
 
 A query de receita filtrava por `event = 'purchase'` — um nome que **nenhuma

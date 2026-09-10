@@ -241,17 +241,20 @@
       // Não existe "receita total": somar BRL com USD não dá número nenhum.
       // O card mostra a MAIOR moeda e avisa quantas outras existem — agora que
       // o app vende em vários países, isso deixou de ser detalhe.
+      // Nomes explícitos: `top` sozinho colide entre os dois blocos abaixo — e
+      // ainda por cima sombreia o `window.top` do browser.
       const rev = (revenue || []).slice().sort((a, b) => b.total - a.total);
-      const top = rev[0];
-      const cur = top ? top.currency : "";
-      const revStr = top ? money(top.total, cur) : "—";
+      const topCurrency = rev[0];
+      const cur = topCurrency ? topCurrency.currency : "";
+      const revStr = topCurrency ? money(topCurrency.total, cur) : "—";
       const revLabel = rev.length > 1
         ? `Receita (${cur} +${rev.length - 1})`
         : `Receita (${cur || "—"})`;
+
       // Só conta país identificado — "Desconhecido" não é um país a mais.
       const known = (countries || []).filter((c) => c.code);
-      const top = known[0];
-      const topStr = top ? top.flag + " " + top.name : "—";
+      const topCountry = known[0];
+      const topStr = topCountry ? topCountry.flag + " " + topCountry.name : "—";
 
       $("kpis").innerHTML = `
         ${kpi(nf.format(f.stages.paywall_view), "Paywall views")}
