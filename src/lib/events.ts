@@ -37,6 +37,107 @@ export const EVENT = {
   purchase: "purchase",
 } as const;
 
+// ─── CICLO DE VIDA DA ASSINATURA (origem: APPLE, não o app) ─────────────────
+//
+// Estes NÃO vêm do device. Vêm do webhook `/apple/notifications`, alimentado
+// pelas App Store Server Notifications V2. Existem porque o app é cego pra
+// tudo que acontece depois da compra:
+//
+//   • cancelar é em Ajustes → Apple ID → Assinaturas, FORA do app;
+//   • quem cancela costuma nunca mais abrir o app, então nenhuma checagem
+//     no launch pega isso de forma confiável;
+//   • renovação (mês 2, ano 2) acontece no servidor da Apple, sem device
+//     envolvido — `subscribe` só dispara na PRIMEIRA compra;
+//   • reembolso idem.
+//
+// O prefixo `sub_` separa origem: `subscribe`/`start_trial` são o que o app
+// VIU acontecer; `sub_*` é o que a Apple CONFIRMA que aconteceu. Nunca some
+// os dois na mesma conta de receita — a mesma venda gera um de cada.
+// ────────────────────────────────────────────────────────────────────────────
+
+export const SUB_EVENT = {
+  /** SUBSCRIBED/INITIAL_BUY sem oferta de trial — já entrou pagando. */
+  started: "sub_started",
+  /** SUBSCRIBED/INITIAL_BUY com oferta de trial gratuito. */
+  trialStarted: "sub_trial_started",
+  /** SUBSCRIBED/RESUBSCRIBE — voltou depois de ter saído. */
+  resubscribed: "sub_resubscribed",
+
+  /**
+   * ⭐ O evento que faltava. DID_CHANGE_RENEWAL_STATUS/AUTO_RENEW_DISABLED.
+   * A pessoa desligou a renovação. ATENÇÃO: ela CONTINUA com acesso até
+   * `expires_at` — cancelar não é expirar. Ver `expired`.
+   */
+  cancelled: "sub_cancelled",
+  /**
+   * Subconjunto de `cancelled`: cancelou ESTANDO EM TRIAL. Sempre vem junto
+   * com `cancelled` (que é o total), nunca no lugar dele. Separado porque a
+   * notificação da Apple é idêntica nos dois casos e as duas coisas pedem
+   * reações opostas: trial cancelado é problema de onboarding/valor percebido
+   * na primeira semana; assinante pago cancelado é problema de retenção.
+   */
+  trialCancelled: "sub_trial_cancelled",
+  /** Cancelou e voltou atrás antes de expirar (AUTO_RENEW_ENABLED). */
+  reactivated: "sub_reactivated",
+
+  /** DID_RENEW — cobrou de novo. É receita de verdade. */
+  renewed: "sub_renewed",
+  /** Primeiro DID_RENEW depois de um trial: o trial virou dinheiro. */
+  trialConverted: "sub_trial_converted",
+
+  /** EXPIRED / GRACE_PERIOD_EXPIRED — o acesso acabou de fato. */
+  expired: "sub_expired",
+  /** Subconjunto de `expired`: o trial acabou sem virar pagamento nenhum. */
+  trialExpired: "sub_trial_expired",
+  /** DID_FAIL_TO_RENEW — cartão recusado. Churn involuntário, recuperável. */
+  billingIssue: "sub_billing_issue",
+  /** DID_RENEW/BILLING_RECOVERY — o cartão passou depois da falha. */
+  billingRecovered: "sub_billing_recovered",
+
+  /** REFUND — a Apple devolveu o dinheiro. Receita NEGATIVA. */
+  refunded: "sub_refunded",
+  /** REFUND_REVERSED — a Apple desfez o reembolso (estorno do estorno). */
+  refundReversed: "sub_refund_reversed",
+  /** REVOKE — saiu do Compartilhamento Familiar e perdeu o acesso. */
+  revoked: "sub_revoked",
+
+  /** DID_CHANGE_RENEWAL_PREF — trocou de plano (upgrade/downgrade). */
+  planChanged: "sub_plan_changed",
+  /** PRICE_INCREASE — aumento de preço proposto/aceito. */
+  priceIncrease: "sub_price_increase",
+  /** OFFER_REDEEMED — resgatou código promocional / oferta. */
+  offerRedeemed: "sub_offer_redeemed",
+
+  /** TEST — o botão "Enviar notificação de teste" do App Store Connect. */
+  appleTest: "apple_test_notification",
+} as const;
+
+/** Os dois jeitos de uma assinatura começar contando como trial. */
+export const TRIAL_START_EVENTS = [
+  EVENT.startTrial,
+  SUB_EVENT.trialStarted,
+] as const;
+
+/** Saídas confirmadas pela Apple. Cancelamento NÃO está aqui: quem cancelou
+ *  ainda tem acesso, e pode voltar atrás antes de expirar. */
+export const CHURN_EVENTS = [
+  SUB_EVENT.expired,
+  SUB_EVENT.revoked,
+] as const;
+
+/** Dinheiro confirmado pela Apple (NÃO misturar com REVENUE_EVENTS do app). */
+export const APPLE_REVENUE_EVENTS = [
+  SUB_EVENT.started,
+  SUB_EVENT.resubscribed,
+  SUB_EVENT.renewed,
+] as const;
+
+/** Dinheiro que a Apple devolveu. Entra com sinal trocado no líquido. */
+export const APPLE_REFUND_EVENTS = [SUB_EVENT.refunded] as const;
+
+/** Tudo que o webhook pode gravar — usado pra separar origem nas queries. */
+export const SUB_EVENTS = Object.values(SUB_EVENT);
+
 /**
  * Dinheiro que entrou de verdade.
  *

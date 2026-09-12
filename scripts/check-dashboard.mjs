@@ -48,6 +48,23 @@ const OVERVIEW = {
     { code: null, flag: "🏳️", name: "Desconhecido", events: 60, paywall_views: 32, converted: 1, rate: 3.1 },
     { code: "JP", flag: "🇯🇵", name: "Japão", events: 12, paywall_views: 8, converted: 1, rate: 12.5 },
   ],
+  // Ciclo de vida vindo do webhook da Apple. Inclui os casos chatos:
+  // cancelamento que ainda não expirou, reembolso e mais de uma moeda.
+  subscriptions: {
+    now: { active: 9, trialing: 4, cancelPending: 3, billingRetry: 1, expired: 12 },
+    period: {
+      sub_started: 2, sub_trial_started: 6, sub_resubscribed: 1,
+      sub_cancelled: 4, sub_trial_cancelled: 3, sub_reactivated: 1,
+      sub_renewed: 5, sub_trial_converted: 2,
+      sub_expired: 3, sub_trial_expired: 2,
+      sub_billing_issue: 1, sub_refunded: 1, sub_revoked: 0,
+    },
+    rates: { trialCancel: 50, trialConversion: 50, cancel: 44.4 },
+    revenue: [
+      { currency: "BRL", gross: 299.7, refunded: 99.9, net: 199.8, count: 3, refunds: 1 },
+      { currency: "USD", gross: 24.95, refunded: 0, net: 24.95, count: 5, refunds: 0 },
+    ],
+  },
 };
 
 const RECENT = {
@@ -99,7 +116,7 @@ setTimeout(() => {
     falhou = true;
   }
 
-  for (const id of ["funnel", "kpis", "revenue", "countries", "events", "recent"]) {
+  for (const id of ["funnel", "subs", "kpis", "revenue", "countries", "events", "recent"]) {
     const node = els[id];
     const conteudo = (node && node.innerHTML) || "";
     const vazio = conteudo.trim().length === 0;

@@ -29,16 +29,28 @@ export default async function statsRoutes(app: FastifyInstance) {
     return { from, to, countries: await app.store.countries(from, to) };
   });
 
+  // Ciclo de vida das assinaturas (origem: webhook da Apple).
+  //
+  // Separado de /stats/revenue de propósito: a MESMA venda gera um `subscribe`
+  // do app e um `sub_started` da Apple. Somar os dois dobra a receita. Aqui os
+  // números são os da Apple — os únicos que sabem de renovação, cancelamento e
+  // reembolso; lá são os do app, que enxerga o funil até o botão de compra.
+  app.get("/stats/subscriptions", guard, async (req) => {
+    const { from, to } = range(req);
+    return app.store.subscriptionStats(from, to);
+  });
+
   // Tudo de uma vez — é o que o dashboard consome.
   app.get("/stats/overview", guard, async (req) => {
     const { from, to } = range(req);
-    const [funnel, events, revenue, countries] = await Promise.all([
+    const [funnel, events, revenue, countries, subscriptions] = await Promise.all([
       app.store.funnel(from, to),
       app.store.eventCounts(from, to),
       app.store.revenue(from, to),
       app.store.countries(from, to),
+      app.store.subscriptionStats(from, to),
     ]);
-    return { from, to, funnel, events, revenue, countries };
+    return { from, to, funnel, events, revenue, countries, subscriptions };
   });
 
   // Eventos crus (debug).

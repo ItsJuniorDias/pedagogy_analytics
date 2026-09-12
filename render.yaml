@@ -28,6 +28,18 @@ services:
         sync: false                # cole o System User token no painel do Render
       - key: META_TEST_EVENT_CODE
         sync: false                # opcional; só durante testes, depois remova
+      # ---- App Store Server Notifications V2 ----
+      # Sem APPLE_BUNDLE_ID o webhook sobe DESLIGADO e responde 503 — de
+      # propósito: 503 faz a Apple reenviar, então nada se perde enquanto
+      # você termina de configurar.
+      - key: APPLE_BUNDLE_ID
+        sync: false                # o bundle id do app (ex.: com.seudominio.pedagogy)
+      - key: APPLE_APP_ID
+        value: "6776011454"        # Apple ID do Pedagogy - Kids Books
+      - key: APPLE_ENVIRONMENT
+        value: Production          # use Sandbox num SEGUNDO serviço, nunca no mesmo
+      - key: SUB_HASH_SECRET
+        generateValue: true        # ⚠️ gerado UMA vez; trocar órfã as assinaturas
 
 databases:
   - name: pedagogy-analytics-db

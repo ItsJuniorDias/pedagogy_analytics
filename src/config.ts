@@ -15,6 +15,16 @@ export interface Config {
   metaApiVersion: string;
   metaTestEventCode: string | null;
   metaCapiEnabled: boolean;
+  // App Store Server Notifications V2 (webhook de assinatura)
+  appleBundleId: string | null;
+  appleAppId: number | null;
+  appleEnvironment: "Production" | "Sandbox";
+  appleRootCertsDir: string;
+  appleRootCertsB64: string | null;
+  appleWebhookPath: string;
+  appleOnlineChecks: boolean;
+  appleSkipVerification: boolean;
+  subHashSecret: string | null;
 }
 
 export const config: Config = {
@@ -35,6 +45,37 @@ export const config: Config = {
     (process.env.META_DATASET_ID?.trim() || null) &&
       (process.env.META_CAPI_TOKEN?.trim() || null),
   ),
+
+  appleBundleId: process.env.APPLE_BUNDLE_ID?.trim() || null,
+  appleAppId: Number(process.env.APPLE_APP_ID) || null,
+  // Qual ambiente este serviço aceita. A Apple manda sandbox e produção pra
+  // URLs DIFERENTES, configuradas separadamente no App Store Connect — então
+  // um serviço só precisa conhecer um. Misturar os dois faz o teste de
+  // sandbox aparecer como venda real no dashboard.
+  appleEnvironment:
+    process.env.APPLE_ENVIRONMENT?.trim() === "Sandbox" ? "Sandbox" : "Production",
+  appleRootCertsDir: process.env.APPLE_ROOT_CERTS_DIR?.trim() || "./certs/apple",
+  appleRootCertsB64: process.env.APPLE_ROOT_CERTS_B64?.trim() || null,
+  // Caminho do webhook. Dá pra trocar por algo não-adivinhável (ex.:
+  // /apple/notifications/9f3c…) como camada extra — a verificação da
+  // assinatura é que protege de verdade, isto só corta ruído de scanner.
+  appleWebhookPath:
+    process.env.APPLE_WEBHOOK_PATH?.trim() || "/apple/notifications",
+  // Checagem online do certificado (OCSP + validade na data de hoje). Custa
+  // uns milissegundos por notificação; desligue só se o Render estiver
+  // estourando o timeout da Apple.
+  appleOnlineChecks: process.env.APPLE_ONLINE_CHECKS !== "false",
+  // Escape hatch pra rodar sem os .cer (ex.: testar o fluxo de ponta a ponta
+  // antes de baixar os certificados). ⚠️ Sem verificação, QUALQUER UM que
+  // descubra a URL escreve no seu banco. Nunca deixe ligado em produção.
+  appleSkipVerification: process.env.APPLE_SKIP_VERIFICATION === "true",
+  // Segredo do HMAC que vira o originalTransactionId em `sub_key`.
+  // Trocar este valor faz o banco perder o vínculo com as assinaturas que já
+  // existem — elas viram linhas órfãs. Defina uma vez e não mexa.
+  subHashSecret:
+    process.env.SUB_HASH_SECRET?.trim() ||
+    process.env.ADMIN_TOKEN?.trim() ||
+    null,
 };
 
 export const isProd = config.nodeEnv === "production";

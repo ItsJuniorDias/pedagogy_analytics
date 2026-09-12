@@ -7,6 +7,7 @@ import { config } from "./config";
 import { createStore } from "./db";
 import { MetaCapi } from "./lib/metaCapi";
 import adminRoutes from "./routes/admin";
+import appleNotificationRoutes from "./routes/appleNotifications";
 import healthRoutes from "./routes/health";
 import ingestRoutes from "./routes/ingest";
 import statsRoutes from "./routes/stats";
@@ -46,6 +47,10 @@ async function main() {
   await app.register(ingestRoutes);
   await app.register(statsRoutes);
   await app.register(adminRoutes);
+  // Webhook da Apple: fora do rate limit de propósito. A Apple faz rajada
+  // de reenvio quando acha que você não recebeu, e um 429 nosso viraria
+  // exatamente o dado perdido que este endpoint existe pra evitar.
+  await app.register(appleNotificationRoutes);
 
   // Dashboard: a PÁGINA é pública (só HTML/JS); os dados vêm dos /stats/*, que
   // exigem o token. O JS do dashboard pergunta o token e o envia nas chamadas.

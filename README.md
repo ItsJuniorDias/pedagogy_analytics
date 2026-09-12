@@ -72,6 +72,8 @@ Pronto — os eventos passam a chegar. O app já envia o formato certo:
 | `GET`  | `/stats/events` | admin | Contagem por evento. |
 | `GET`  | `/stats/revenue` | admin | Receita paga por moeda + trials à parte. |
 | `GET`  | `/stats/countries` | admin | Países com bandeira, volume e conversão. |
+| `GET`  | `/stats/subscriptions` | admin | Ciclo de vida vindo da Apple: cancelamento, renovação, reembolso. |
+| `POST` | `/apple/notifications` | assinatura da Apple | Webhook das App Store Server Notifications V2. |
 | `GET`  | `/events` | admin | Eventos crus (debug), paginado. |
 | `DELETE` | `/admin/clear?confirm=DELETE_ALL` | admin | Apaga TODOS os eventos (irreversível). |
 
@@ -91,7 +93,7 @@ curl -X DELETE "https://SEU-SERVICO/admin/clear?confirm=DELETE_ALL" \
 ## Checar o dashboard antes de subir
 
 ```bash
-npm run check:dashboard
+npm run typecheck && npm run check:dashboard && npm run check:apple
 ```
 
 O `public/index.html` é a única parte do projeto que o TypeScript **não** olha:
@@ -143,6 +145,144 @@ porque cada arquivo tinha a sua própria cópia de `'purchase'`.
 `subscribe` *e* `purchase` para a mesma venda simulada — com a query nova isso
 conta duas vezes. O `seed.ts` foi corrigido, mas as linhas antigas continuam lá:
 limpe com o botão *🗑 Limpar todos os eventos* antes de olhar número pra valer.
+
+---
+
+## Cancelamento, renovação e reembolso (webhook da Apple)
+
+A seção acima termina dizendo que "um trial vira receita quando renova, e a
+renovação chega como `subscribe`". **Isso estava errado.** A renovação nunca
+chegava: `subscribe` é emitido pelo app, no momento da compra, e renovação
+acontece no servidor da Apple — sem device nenhum ligado.
+
+O mesmo buraco cobria mais três coisas:
+
+| O que acontece | Onde acontece | O app via? |
+|---|---|---|
+| Cancelar assinatura | Ajustes → Apple ID → Assinaturas | ❌ nunca |
+| Trial virar pagamento | servidor da Apple | ❌ nunca |
+| Renovação (mês 2, ano 2) | servidor da Apple | ❌ nunca |
+| Reembolso | suporte da Apple | ❌ nunca |
+
+**Não dá pra resolver isso no app.** Checar `Product.SubscriptionInfo.status`
+no launch parece resolver o cancelamento, mas só descobre o cancelamento de
+quem *voltou a abrir o app* — e quem cancela um trial tipicamente não volta.
+Você mediria exatamente a minoria errada.
+
+A fonte completa é o **App Store Server Notifications V2**: a Apple faz POST no
+seu servidor a cada mudança de estado. É o que o RevenueCat empacota e revende.
+
+### Ligar (5 minutos)
+
+```bash
+npm run certs:apple      # baixa os certificados raiz PÚBLICOS da Apple
+git add certs/apple      # commite: o build do Render não deve depender do site da Apple
+```
+
+No **Render → Environment**, defina `APPLE_BUNDLE_ID` (o resto o
+`render.yaml` já traz). Depois, em **App Store Connect → Pedagogy → App
+Information → App Store Server Notifications**:
+
+- **Version**: `Version 2` (a V1 é outro formato e não é lida aqui)
+- **Production Server URL**: `https://SEU-SERVICO.onrender.com/apple/notifications`
+- Clique em **Send Test Notification** — ela aparece no dashboard em segundos.
+
+> **Sandbox num serviço separado.** A Apple manda sandbox e produção pra URLs
+> diferentes justamente pra você poder separá-las. Apontar as duas pro mesmo
+> serviço faz o seu teste de compra virar venda real no relatório. Se quiser
+> medir sandbox, suba um segundo serviço com `APPLE_ENVIRONMENT=Sandbox`.
+
+Enquanto `APPLE_BUNDLE_ID` não existir, o webhook responde **503 de propósito**:
+503 faz a Apple reenfileirar (até 5 tentativas, ao longo de ~3 dias), então
+nada se perde enquanto você termina de configurar. Um 200 é que seria
+destrutivo — a Apple marcaria como entregue e nunca mais mandaria.
+
+### As duas distinções que quase todo dashboard caseiro erra
+
+**1. Cancelar ≠ expirar.** `DID_CHANGE_RENEWAL_STATUS/AUTO_RENEW_DISABLED` é o
+clique em "cancelar". A pessoa **continua com acesso** até `expiresDate`. O
+acesso só acaba no `EXPIRED`, que chega dias (ou 11 meses) depois. Somar os
+dois infla o churn e apaga a janela de win-back — que é exatamente o intervalo
+entre um e outro. Por isso o dashboard tem o card *"Ainda com acesso"*: são as
+assinaturas onde uma oferta ainda tem para onde ir.
+
+**2. Trial cancelado ≠ pagante cancelado.** A notificação da Apple é
+**idêntica** nos dois casos. O que diferencia é o *estado* da assinatura
+naquele momento — e estado não existe num fluxo append-only. Daí a tabela
+`subscriptions`. `sub_cancelled` é sempre o total; `sub_trial_cancelled` é o
+recorte, emitido junto e nunca no lugar. Assim "quantos cancelaram" continua
+sendo uma soma só.
+
+As duas pedem reações opostas: trial cancelado é problema de valor percebido na
+primeira semana; pagante cancelado é retenção. E `DID_FAIL_TO_RENEW` (cartão
+recusado) não é nenhum dos dois — é churn involuntário, que se resolve com
+aviso de cobrança, não com desconto.
+
+### Eventos que o webhook grava
+
+| Evento | Notificação da Apple |
+|---|---|
+| `sub_started` / `sub_trial_started` | `SUBSCRIBED/INITIAL_BUY` (com ou sem oferta de trial) |
+| `sub_resubscribed` | `SUBSCRIBED/RESUBSCRIBE` |
+| **`sub_cancelled`** + `sub_trial_cancelled` | `DID_CHANGE_RENEWAL_STATUS/AUTO_RENEW_DISABLED` |
+| `sub_reactivated` | `.../AUTO_RENEW_ENABLED` — cancelou e voltou atrás |
+| `sub_renewed` + `sub_trial_converted` | `DID_RENEW` |
+| `sub_expired` + `sub_trial_expired` | `EXPIRED`, `GRACE_PERIOD_EXPIRED` |
+| `sub_billing_issue` / `sub_billing_recovered` | `DID_FAIL_TO_RENEW` / `DID_RENEW/BILLING_RECOVERY` |
+| `sub_refunded` / `sub_revoked` | `REFUND` / `REVOKE` |
+
+Tipo desconhecido vira `apple_<type>` em vez de ser descartado: a Apple não
+reenvia depois que você respondeu 200, então notificação jogada fora é dado
+perdido pra sempre.
+
+### Por que `sub_*` e não `subscribe`
+
+A **mesma venda** gera um `subscribe` (o app viu) e um `sub_started` (a Apple
+confirmou). Se os dois entrassem na mesma conta, toda receita dobraria. O
+prefixo separa origem, e `/stats/revenue` (app) e `/stats/subscriptions`
+(Apple) continuam sendo blocos distintos no dashboard:
+
+- o **app** mede o funil até o botão de compra — e só ele enxerga isso;
+- a **Apple** mede o que sobreviveu depois — e só ela enxerga isso.
+
+Agora que existe `sub_renewed`, o campo `trialValue` de `/stats/revenue` (que o
+README chama de "teto, não previsão") tem com o que ser comparado: a taxa real
+está em `rates.trialConversion`, calculada só sobre trials **que já
+terminaram** — converteu ou expirou. Quem ainda está no meio do trial fica de
+fora, senão a taxa começa artificialmente baixa todo dia e "melhora" sozinha.
+
+### Privacidade
+
+O `originalTransactionId` da Apple é um identificador permanente de assinante,
+e o resto do projeto foi construído sem identificador nenhum. Ele **nunca é
+gravado**: vira `sub_key`, um HMAC-SHA256 com `SUB_HASH_SECRET`. Isso preserva
+a única pergunta que importa — "é a mesma assinatura de antes?" — sem guardar
+o original. Pra investigar um caso específico, gere o HMAC do id que o cliente
+te passar e procure por ele.
+
+> ⚠️ `SUB_HASH_SECRET` se define **uma vez**. Trocar o valor faz todas as
+> assinaturas já gravadas virarem linhas órfãs.
+
+Nada disso muda o que o app coleta: os dados vêm da Apple pro seu servidor,
+não do device. A ficha de privacidade da App Store não muda, e a postura Kids
+também não — `events` continua append-only e sem identidade.
+
+### Testar sem a Apple
+
+```bash
+npm run check:apple
+```
+
+Sobe o servidor num SQLite temporário, simula a sequência real (trial →
+cancelamento → expiração, e um segundo trial que converte) e confere os
+números. Inclui os casos que passam no compilador e erram o que interessa:
+cancelamento contado como expiração, reenvio duplicando contagem, e o `price`
+em mili-unidades (99900 = R$ 99,90 — não R$ 99.900,00).
+
+Pra testar o fluxo HTTP sem os certificados, `APPLE_SKIP_VERIFICATION=true`
+aceita payload sem verificar quem assinou. **Nunca em produção**: sem
+verificação, qualquer um que descobrir a URL escreve "3.000 cancelamentos" no
+seu dashboard.
 
 ---
 
@@ -247,6 +387,15 @@ Copie `.env.example` para `.env`. Principais:
 | `DB_PATH` | `./data/analytics.db` | Arquivo SQLite (quando sem Postgres). |
 | `RATE_LIMIT_PER_MIN` | `300` | Limite por IP no `/events` (0 = off). |
 | `CORS_ORIGIN` | `*` | Origem liberada no `/events` (Expo web). |
+| `APPLE_BUNDLE_ID` | — | Bundle id do app. **Sem ele o webhook fica desligado (503).** |
+| `APPLE_APP_ID` | — | Apple ID do app (Pedagogy = `6776011454`). |
+| `APPLE_ENVIRONMENT` | `Production` | `Production` ou `Sandbox` — nunca os dois no mesmo serviço. |
+| `APPLE_ROOT_CERTS_DIR` | `./certs/apple` | Onde ficam os `.cer` do `npm run certs:apple`. |
+| `APPLE_ROOT_CERTS_B64` | vazio | Alternativa aos arquivos: certificados em base64, separados por vírgula. |
+| `APPLE_WEBHOOK_PATH` | `/apple/notifications` | Troque por algo não-adivinhável pra cortar ruído de scanner. |
+| `APPLE_ONLINE_CHECKS` | `true` | OCSP + validade na data de hoje. Custa alguns ms. |
+| `APPLE_SKIP_VERIFICATION` | `false` | ⚠️ Aceita notificação sem verificar. Só teste local. |
+| `SUB_HASH_SECRET` | `ADMIN_TOKEN` | HMAC do `originalTransactionId`. Defina uma vez e não mexa. |
 
 Sem `ADMIN_TOKEN`: liberado em dev, **bloqueado em produção** (fail-safe).
 
@@ -281,13 +430,25 @@ src/
     ingest.ts        # POST /events
     stats.ts         # GET /stats/* e GET /events
     health.ts        # GET /health
+    appleNotifications.ts  # POST /apple/notifications (webhook da Apple)
   lib/
     country.ts       # normaliza ISO, bandeira por code point, nome via Intl
+    storefront.ts    # storefront da Apple (alpha-3) → ISO alpha-2
     funnel.ts        # monta o funil a partir das contagens
+    subStats.ts      # monta o bloco de assinaturas (igual nos dois drivers)
     extract.ts       # extrai product_id/currency/value/source do params
+    events.ts        # nomes canônicos de evento (fonte única de verdade)
+    appleMap.ts      # notificação da Apple → evento interno + status
+    appleVerifier.ts # verifica a assinatura JWS da Apple
+    appleCerts.ts    # carrega os certificados raiz
     auth.ts          # guard do ADMIN_TOKEN
     ratelimit.ts     # limiter em memória por IP
 public/index.html    # dashboard
-scripts/seed.ts      # dados de exemplo
+certs/apple/         # certificados raiz da Apple (npm run certs:apple)
+scripts/
+  seed.ts                    # dados de exemplo
+  fetch-apple-certs.mjs      # baixa os certificados raiz
+  check-dashboard.mjs        # roda o JS do dashboard num vm
+  check-apple-webhook.mjs    # testa o webhook de ponta a ponta
 render.yaml          # blueprint de deploy
 ```

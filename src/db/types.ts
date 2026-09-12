@@ -73,10 +73,126 @@ export interface CountryRow {
   rate: number;
 }
 
+// ─── ASSINATURAS (estado vindo da Apple) ────────────────────────────────────
+//
+// Por que uma tabela separada em vez de mais linhas em `events`:
+//
+//   `events` é um fluxo append-only e SEM identidade — é o que mantém o funil
+//   compatível com a categoria Kids. Assinatura é o oposto: uma entidade com
+//   ESTADO que muda ao longo de meses (trial → pago → cancelado → expirado).
+//   Só com estado dá pra responder "quantos assinantes ativos existem agora?"
+//   e "esse cancelamento foi de um trial ou de um pagante?" — a notificação da
+//   Apple, sozinha, não diz nenhuma das duas coisas.
+//
+// A chave é `sub_key`: HMAC-SHA256 do `originalTransactionId`. O id cru da
+// Apple nunca é gravado. Pra investigar um caso específico, gere o HMAC do id
+// que o cliente te passar e procure por ele.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface SubscriptionRow {
+  /** HMAC do originalTransactionId. Nunca o id cru. */
+  sub_key: string;
+  product_id: string | null;
+  /** active | trialing | cancelled | expired | billing_retry | refunded | revoked */
+  status: string;
+  is_trial: boolean;
+  /** false = a pessoa desligou a renovação (mas talvez ainda tenha acesso). */
+  auto_renew: boolean;
+  environment: string | null;
+  /** ISO alpha-2 do storefront (onde ela PAGA). */
+  country: string | null;
+  currency: string | null;
+  /** Em unidade monetária, já dividido por 1000. */
+  price: number | null;
+  started_at: number | null;
+  expires_at: number | null;
+  cancelled_at: number | null;
+  expired_at: number | null;
+  renewals: number;
+  last_notification: string | null;
+  updated_at: number;
+}
+
+/** Campos `undefined` são preservados; a linha nunca é sobrescrita inteira. */
+export interface SubscriptionPatch {
+  sub_key: string;
+  product_id?: string | null;
+  status?: string;
+  is_trial?: boolean;
+  auto_renew?: boolean;
+  environment?: string | null;
+  country?: string | null;
+  currency?: string | null;
+  price?: number | null;
+  started_at?: number | null;
+  expires_at?: number | null;
+  cancelled_at?: number | null;
+  expired_at?: number | null;
+  /** Quanto somar em `renewals` (0 na maioria das notificações). */
+  renewalsInc?: number;
+  last_notification?: string | null;
+  updated_at: number;
+}
+
+export interface AppleRevenueRow {
+  currency: string;
+  /** Confirmado pela Apple: assinaturas + renovações. */
+  gross: number;
+  /** Reembolsado no período (valor positivo). */
+  refunded: number;
+  /** gross − refunded. */
+  net: number;
+  /** Nº de cobranças confirmadas. */
+  count: number;
+  /** Nº de reembolsos. */
+  refunds: number;
+}
+
+export interface SubscriptionStats {
+  from: number;
+  to: number;
+  /** Foto de AGORA — não depende do período escolhido. */
+  now: {
+    active: number;
+    trialing: number;
+    /** Cancelou mas ainda tem acesso. É aqui que win-back ainda funciona. */
+    cancelPending: number;
+    billingRetry: number;
+    expired: number;
+  };
+  /** Contagens DENTRO do período (da tabela de eventos). */
+  period: Record<string, number>;
+  rates: {
+    /** trials cancelados ÷ trials iniciados, no período. */
+    trialCancel: number;
+    /** convertidos ÷ (convertidos + expirados) — só trials que já terminaram. */
+    trialConversion: number;
+    /** cancelamentos ÷ novas assinaturas, no período. */
+    cancel: number;
+  };
+  revenue: AppleRevenueRow[];
+}
+
 export interface Store {
   driver: "sqlite" | "postgres";
   init(): Promise<void>;
   insert(events: EventInput[]): Promise<number>;
+  /**
+   * Registra o UUID da notificação. Devolve `true` se era inédita.
+   *
+   * A Apple REENVIA a mesma notificação quando o seu servidor não responde
+   * 2xx (e às vezes mesmo quando responde). Sem esta trava, uma instabilidade
+   * de 30s no Render vira cinco cancelamentos no dashboard.
+   */
+  claimAppleNotification(
+    uuid: string,
+    type: string,
+    subtype: string | null,
+    receivedAt: number,
+  ): Promise<boolean>;
+  getSubscription(subKey: string): Promise<SubscriptionRow | null>;
+  upsertSubscription(patch: SubscriptionPatch): Promise<void>;
+  subscriptionStats(from: number, to: number): Promise<SubscriptionStats>;
   funnel(from: number, to: number): Promise<FunnelResult>;
   eventCounts(from: number, to: number): Promise<EventCount[]>;
   revenue(from: number, to: number): Promise<RevenueRow[]>;

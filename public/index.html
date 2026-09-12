@@ -98,6 +98,14 @@
     .danger-btn { background: #fff; color: var(--pink-dark); border: 1.5px solid #ffb8cd; }
     .danger-btn:hover { background: #ffe8ef; }
     .muted { color: var(--muted); }
+
+    /* Assinaturas (Apple) */
+    .kpi.warn .n { color: var(--pink-dark); }
+    .kpi.good .n { color: var(--green); }
+    .kpi .hint { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+    .empty { background: var(--card); border: 1px dashed var(--line); border-radius: 16px;
+             padding: 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .empty code { background: #f4f4f6; padding: 1px 6px; border-radius: 6px; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -125,6 +133,9 @@
 
     <h2>Funil de conversão</h2>
     <div class="funnel" id="funnel"><div class="muted">Carregando…</div></div>
+
+    <h2>Assinaturas · o que a Apple confirma</h2>
+    <div id="subs"></div>
 
     <h2>Resumo</h2>
     <div class="cards" id="kpis"></div>
@@ -205,6 +216,7 @@
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         renderFunnel(data.funnel);
+        renderSubs(data.subscriptions);
         renderKpis(data.funnel, data.revenue, data.countries);
         renderRevenue(data.revenue);
         renderCountries(data.countries);
@@ -235,6 +247,85 @@
             <span class="count">${nf.format(count)}</span></div>
           <div class="track"><div class="fill" style="width:${width}"></div></div>
         </div>`;
+    }
+
+    // Bloco das assinaturas. Os números daqui vêm do webhook da Apple, não do
+    // app — são os únicos que sabem de cancelamento, renovação e reembolso.
+    //
+    // Estão SEPARADOS da seção "Receita" de propósito: a mesma venda gera um
+    // `subscribe` do app e um `sub_started` da Apple. Somar os dois dobraria
+    // tudo. O app mede o funil até o botão; a Apple mede o que sobreviveu.
+    function renderSubs(s) {
+      if (!s) return;
+      const p = s.period || {};
+      const total = Object.values(p).reduce((a, b) => a + (b || 0), 0);
+      const semEstado = total === 0 && !s.now.active && !s.now.trialing;
+
+      if (semEstado) {
+        // Zero aqui quase nunca é "ninguém cancelou" — é o webhook ainda não
+        // configurado. Dizer isso evita a pior leitura possível do dashboard.
+        $("subs").innerHTML = `
+          <div class="empty">
+            Nenhuma notificação da Apple recebida ainda.<br />
+            Configure a URL do servidor em <b>App Store Connect → seu app →
+            App Information → App Store Server Notifications</b> (versão 2) e
+            aponte pra <code>/apple/notifications</code>. Use o botão
+            <i>Send Test Notification</i> de lá pra confirmar — a de teste
+            aparece aqui em segundos.
+          </div>`;
+        return;
+      }
+
+      const money = (r) => {
+        try {
+          return new Intl.NumberFormat("pt-BR", {
+            style: "currency", currency: r.currency,
+          }).format(r.net);
+        } catch { return r.net.toFixed(2) + " " + r.currency; }
+      };
+      const rev = (s.revenue || []).slice().sort((a, b) => b.net - a.net);
+      const liquido = rev[0] ? money(rev[0]) : "—";
+      const revLabel = rev.length > 1
+        ? `Líquido (${rev[0].currency} +${rev.length - 1})`
+        : `Líquido (${rev[0] ? rev[0].currency : "—"})`;
+      const reembolsos = rev.reduce((a, r) => a + r.refunds, 0);
+
+      $("subs").innerHTML = `
+        <div class="cards">
+          ${kpiHint(nf.format(s.now.active), "Assinantes pagando", "agora, não no período")}
+          ${kpiHint(nf.format(s.now.trialing), "Em trial", "ainda decidindo")}
+          ${kpiHint(nf.format(p.sub_cancelled || 0), "Cancelamentos", "desligaram a renovação", "warn")}
+          ${kpiHint(nf.format(s.now.cancelPending), "Ainda com acesso", "cancelaram mas não expiraram — dá pra tentar trazer de volta", "warn")}
+          ${kpiHint(s.rates.trialConversion + "%", "Trial → pago", "entre os trials que já terminaram", "good")}
+          ${kpiHint(liquido, revLabel, reembolsos ? `já descontados ${reembolsos} reembolso(s)` : "confirmado pela Apple")}
+        </div>
+        <table style="margin-top:12px">
+          <tr><th>No período</th><th class="num">Qtd.</th></tr>
+          ${linha("🎁 Trials iniciados", p.sub_trial_started)}
+          ${linha("💳 Assinaturas diretas", (p.sub_started || 0) + (p.sub_resubscribed || 0))}
+          ${linha("🔁 Renovações cobradas", p.sub_renewed)}
+          ${linha("🎉 Trials que viraram pagamento", p.sub_trial_converted)}
+          ${linha("🚪 Cancelaram durante o trial", p.sub_trial_cancelled)}
+          ${linha("🚪 Cancelaram já pagando", (p.sub_cancelled || 0) - (p.sub_trial_cancelled || 0))}
+          ${linha("↩️ Voltaram atrás (reativaram)", p.sub_reactivated)}
+          ${linha("⌛ Acesso encerrado", p.sub_expired)}
+          ${linha("💳 Falha de cobrança", p.sub_billing_issue)}
+          ${linha("💸 Reembolsos", p.sub_refunded)}
+        </table>
+        <div class="foot" style="text-align:left">
+          Cancelar ≠ expirar: quem cancela continua com acesso até o fim do
+          período pago. A diferença entre as duas linhas é a sua janela de
+          win-back.
+        </div>`;
+    }
+    function linha(label, n) {
+      const v = n || 0;
+      const cls = v === 0 ? ' class="num muted"' : ' class="num"';
+      return `<tr><td>${label}</td><td${cls}>${nf.format(v)}</td></tr>`;
+    }
+    function kpiHint(n, k, hint, cls) {
+      return `<div class="kpi ${cls || ""}"><div class="n">${n}</div>
+                <div class="k">${k}</div><div class="hint">${hint}</div></div>`;
     }
 
     function renderKpis(f, revenue, countries) {
