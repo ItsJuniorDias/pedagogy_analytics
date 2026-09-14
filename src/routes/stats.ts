@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
+import type { StoredEventView } from "../db/types";
 import { requireAdmin } from "../lib/auth";
+import { countryName, flagEmoji } from "../lib/country";
 
 // Rotas de leitura do funil/estatística. Todas protegidas por requireAdmin.
 // Aceitam ?from= e ?to= (epoch ms OU ISO). Default: últimos 7 dias.
@@ -54,11 +56,24 @@ export default async function statsRoutes(app: FastifyInstance) {
   });
 
   // Eventos crus (debug).
+  //
+  // Cada linha sai com `country` (as duas letras, como está no banco) mais
+  // `flag` e `country_name` já prontos — mesma convenção de /stats/countries.
+  // O evento guarda só o código; bandeira e nome são derivados e não ocupam
+  // espaço em disco.
   app.get("/events", guard, async (req) => {
     const q = req.query as Record<string, string>;
     const limit = clamp(Number(q.limit ?? 50), 1, 500);
     const offset = Math.max(0, Number(q.offset ?? 0));
-    return { limit, offset, events: await app.store.recent(limit, offset) };
+
+    const rows = await app.store.recent(limit, offset);
+    const events: StoredEventView[] = rows.map((e) => ({
+      ...e,
+      flag: flagEmoji(e.country),
+      country_name: countryName(e.country),
+    }));
+
+    return { limit, offset, events };
   });
 }
 

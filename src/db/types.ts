@@ -22,6 +22,22 @@ export interface StoredEvent {
   country: string | null;
 }
 
+/**
+ * `StoredEvent` + país já formatado. É o que `GET /events` devolve.
+ *
+ * A formatação é do SERVIDOR, igual ao que `/stats/countries` já faz. O
+ * dashboard é um HTML solto, sem build — ele não consegue importar
+ * `lib/country.ts`. Montar a bandeira no cliente significaria uma segunda
+ * cópia da aritmética de Regional Indicator, e duas implementações da mesma
+ * regra divergem na primeira vez que alguém corrigir só uma delas.
+ */
+export interface StoredEventView extends StoredEvent {
+  /** Emoji da bandeira (🏳️ quando `country` é null). */
+  flag: string;
+  /** Nome localizado em pt-BR ("Brasil"), ou "Desconhecido". */
+  country_name: string;
+}
+
 export interface FunnelResult {
   from: number;
   to: number;

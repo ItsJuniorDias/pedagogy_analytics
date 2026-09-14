@@ -89,6 +89,11 @@
             display: inline-block; width: 26px; text-align: center; }
     .cty { display: flex; align-items: center; }
     .cty .code { color: var(--muted); font-size: 12px; font-weight: 700; margin-left: 6px; }
+    /* Versão compacta pra tabela de últimos eventos, que é mais densa que a
+       lista de países — a bandeira ali é referência rápida, não o assunto. */
+    .flag.sm { font-size: 15px; width: 18px; margin-right: 5px; }
+    td.geo { white-space: nowrap; }
+    td.geo .code { color: var(--muted); font-size: 12px; font-weight: 700; }
     td.rate { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
     td.rate.good { color: var(--green); }
     td.rate.zero { color: var(--muted); font-weight: 600; }
@@ -441,8 +446,10 @@
         </div>`;
     }
 
-    // Os nomes vêm do Intl no servidor, não do usuário — mas isto aqui monta
-    // HTML por concatenação, e escapar é mais barato que confiar.
+    // Nome de país vem do Intl no servidor, mas nome de evento e params vêm do
+    // POST /events, que é PÚBLICO — qualquer um pode mandar um evento chamado
+    // `<img src=x onerror=…>`. Como isto aqui monta HTML por concatenação, tudo
+    // que não foi gerado neste arquivo passa por aqui antes de virar markup.
     function esc(s) {
       return String(s).replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -457,7 +464,7 @@
       $("events").innerHTML = `
         <table><thead><tr><th>Evento</th><th class="num">Contagem</th></tr></thead>
         <tbody>${rows.map((r) => `<tr>
-          <td><span class="tag">${r.event}</span></td>
+          <td><span class="tag">${esc(r.event)}</span></td>
           <td class="num">${nf.format(r.count)}</td></tr>`).join("")}</tbody></table>`;
     }
 
@@ -468,11 +475,14 @@
         const { events } = await res.json();
         if (!events || !events.length) { $("recent").innerHTML = `<div class="kpi"><span class="muted">Vazio.</span></div>`; return; }
         $("recent").innerHTML = `
-          <table><thead><tr><th>Quando</th><th>Evento</th><th>Params</th></tr></thead>
-          <tbody>${events.map((e) => `<tr>
+          <table><thead><tr><th>Quando</th><th>País</th><th>Evento</th><th>Params</th></tr></thead>
+          <tbody>${events.map((e) => `<tr class="${e.country ? "" : "unknown"}">
             <td class="muted">${new Date(e.ts).toLocaleString("pt-BR")}</td>
-            <td><span class="tag">${e.event}</span></td>
-            <td class="muted">${shortParams(e.params)}</td></tr>`).join("")}</tbody></table>`;
+            <td class="geo" title="${esc(e.country_name || "Desconhecido")}">
+              <span class="flag sm">${esc(e.flag || "🏳️")}</span><span class="code">${e.country ? esc(e.country) : "—"}</span>
+            </td>
+            <td><span class="tag">${esc(e.event)}</span></td>
+            <td class="muted">${esc(shortParams(e.params))}</td></tr>`).join("")}</tbody></table>`;
       } catch { $("recent").innerHTML = ""; }
     }
     function shortParams(p) {

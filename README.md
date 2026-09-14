@@ -330,6 +330,16 @@ zero — e o número vai encolhendo sozinho conforme os eventos novos chegam.
 países com menos de 10 paywall views. Com 2 views e 1 assinatura, "50%" é ruído
 que convida a decidir errado.
 
+**Evento a evento.** Além do agregado, `GET /events` devolve o país de cada
+linha e a tabela "Últimos eventos" mostra bandeira + código. Serve pra uma
+pergunta que o agregado não responde: *este* `sub_refunded` de ontem veio de
+onde? O banco guarda só as duas letras — `flag` e `country_name` são derivados
+na resposta, pelo mesmo `lib/country.ts` que monta o relatório agregado:
+
+```json
+{ "event": "subscribe", "country": "BR", "flag": "🇧🇷", "country_name": "Brasil" }
+```
+
 ```bash
 curl -s "https://SEU-SERVICO/stats/countries" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
